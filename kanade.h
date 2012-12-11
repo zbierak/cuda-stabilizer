@@ -1,14 +1,16 @@
 #ifndef MZBIERSK_RIM_KANADE_H
 #define MZBEIRSK_RIM_KANADE_H
 
+const unsigned PYRAMID_SIZE = 5;
+
 void kanadeInit();
 void kanadeCleanup();
 void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height);
 unsigned char* kanadeExecute(unsigned width, unsigned height);
 
-// the following to be used by kanade-common only, assumed current frame is already loaded
+// for testing purposes only
 
-unsigned char* kanadeTranslate(unsigned width, unsigned height);
-void calculateG(unsigned width, unsigned height, float& dxdx, float& dxdy, float& dydy);
+void kanadeTestBuildPyramid(unsigned char* target, unsigned width, unsigned height);
+void kanade8to24(unsigned char* target, unsigned char* src, unsigned width, unsigned height);
 
 #endif

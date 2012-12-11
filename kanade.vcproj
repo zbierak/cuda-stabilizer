@@ -190,6 +190,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\kanade-test.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\main.cpp"
 				>
 			</File>
@@ -201,6 +205,14 @@
 			>
 			<File
 				RelativePath=".\helper_cuda.h"
+				>
+			</File>
+			<File
+				RelativePath=".\kanade-inner.h"
+				>
+			</File>
+			<File
+				RelativePath=".\kanade-test.h"
 				>
 			</File>
 			<File
