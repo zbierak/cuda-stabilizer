@@ -1,0 +1,1 @@
+This software uses libraries from the FFmpeg project under the LGPLv2.1.
