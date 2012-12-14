@@ -27,8 +27,11 @@ struct MFrame
 	}
 };
 
-bool SaveAsPPM32(unsigned char* ptr, std::string fileName, int width, int height);
-bool SaveAsPPM(unsigned char* ptr, std::string fileName, int width, int height);
+inline bool SaveAsPPM32(unsigned char* ptr, std::string fileName, int width, int height);
+inline bool SaveAsPPM24(unsigned char* ptr, std::string fileName, int width, int height);
+inline bool SaveAsPPM8(unsigned char* ptr, std::string fileName, int width, int height);
+
+
 
 #include "mframe_imp.h"
 

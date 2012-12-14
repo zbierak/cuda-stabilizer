@@ -8,9 +8,10 @@ void kanadeInit();
 void kanadeCleanup();
 void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height);
 void kanadeBuildPyramidLevel(unsigned levelId, unsigned newWidth, unsigned newHeight);
-unsigned char* kanadeTranslate(unsigned width, unsigned height);
+void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height);
 void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& dxdx, float& dxdy, float& dydy);
-void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& b);
+void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& bx, float& by);
+void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYRAMID_SIZE]);
 }
 
 // functions from GPU implementation
@@ -20,9 +21,10 @@ void kanadeInit();
 void kanadeCleanup();
 void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height);
 void kanadeBuildPyramidLevel(unsigned levelId, unsigned newWidth, unsigned newHeight);
-unsigned char* kanadeTranslate(unsigned width, unsigned height);
+void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height);
 void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& dxdx, float& dxdy, float& dydy);
-void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& b);
+void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& bx, float& by);
+void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYRAMID_SIZE]);
 }
 #endif
 

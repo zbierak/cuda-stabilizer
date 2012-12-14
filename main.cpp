@@ -9,6 +9,10 @@
 #include <math.h>
 #include <limits>
 
+// possible preprocessor parameters:
+//	KANADE_NO_GPU - the CPU code is compiled & executed (no CUDA card required)
+//	KANADE_NO_RFRAME_UPDATE - the reference frame is not updated (the first frame is the reference frame)
+
 using namespace std;
 
 int main()
@@ -19,15 +23,17 @@ int main()
 	MFFMpegOutput output;
 
 	string file, outputfile;
-	//cout << "Input file: ";
-	//cin >> file;
+	cout << "Input file: ";
+	cin >> file;
 
-	//cout << "Output file: ";
-	//cin >> outputfile;
+	cout << "Output file: ";
+	cin >> outputfile;
 
 	//file = "c.mov";
-	file = "hippo.mkv";
-	outputfile = "out.mkv";
+	//file = "hippo.mkv";
+	//file = "MOV00A.MOD";
+	//file = "out1.mkv";
+	//outputfile = "out.mkv";
 
 	MFFMpegInput::InitError ie = input.Init(file.c_str());
 	if (ie != MFFMpegInput::IE_NONE)
@@ -45,7 +51,6 @@ int main()
 		return 1;
 	}
 
-	int i=0;
 	MFrame frame;
 	MFFMpegInput::ReadFrameResult rfr = MFFMpegInput::RFR_IGNORE;
 
@@ -60,43 +65,45 @@ int main()
 	}
 
 	// poki co nie pisz pierwszej klatki
-	//output.WriteVideoFrame((unsigned char*)frame.pFrame->data[0], frame.width, frame.height);
+	output.WriteVideoFrame((unsigned char*)frame.pFrame->data[0], frame.width, frame.height);
 
 	kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);
+	//kanadeTestNextFrame(frame.pFrame->data[0], frame.width, frame.height);
 
-	unsigned char* result8 = (unsigned char*)malloc(frame.width*frame.height*sizeof(unsigned char));
+	//unsigned char* result8 = (unsigned char*)malloc(frame.width*frame.height*sizeof(unsigned char));
 	unsigned char* result24 = (unsigned char*)malloc(frame.width*frame.height*3*sizeof(unsigned char));
 
 	// przelec przez wszystkie ramki az do konca strumienia
 	while ((rfr = input.ReadNextFrame(&frame)) != MFFMpegInput::RFR_STREAMEND)
 	{
 		if (rfr == MFFMpegInput::RFR_OK)								// was the frame parsed ok?
-		{								
-			kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);
+		{			
+			kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);			
+			kanadeExecute(result24, frame.width, frame.height);
 			
-			kanadeTestBuildPyramid(result8, frame.width, frame.height);
-			kanade8to24(result24, result8, frame.width, frame.height);
+			//kanadeTestNextFrame(frame.pFrame->data[0], frame.width, frame.height);
+			//kanadeTestBuildPyramid(result8, frame.width, frame.height);
+			//kanadeTestCompareBuildPyramid(result8, frame.width, frame.height);
+			//kanadeTestGenerateG(result8, frame.width, frame.height);			
+			//kanadeTestGenerateB(result8, frame.width, frame.height);
+			//kanade8to24(result24, result8, frame.width, frame.height);
 
-				//unsigned char* result = kanadeExecute(frame.width, frame.height);
 			output.WriteVideoFrame(result24, frame.width, frame.height);
-
+			
 			cout << ".";
-			i++;
-
-			// mozna tez zapisac ramke do pliku ppm poleceniem:
-			// frame.SaveAsPPM(fileName);
 		}
 	}
 
-	free(result8);
+	//free(result8);
 	free(result24);
 
 
 	cout << endl;	
 
-	system("pause");
-
 	kanadeCleanup();
+	kanadePrintStats();
+
+	system("pause");
 
 	return 0;
 }
