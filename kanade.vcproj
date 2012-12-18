@@ -124,7 +124,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalOptions="-DKANADE_NO_GPU1"
+				AdditionalOptions="-DKANADE_NO_GPU -DKANADE_NO_RFRAME_UPDATE1"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				RuntimeLibrary="2"

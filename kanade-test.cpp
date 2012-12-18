@@ -115,11 +115,11 @@ void kanadeTestTranslate(unsigned char* target, float vx, float vy, unsigned wid
 {
 	unsigned char* t1 = (unsigned char*)malloc(3*width*height*sizeof(unsigned char));
 	unsigned char* t2 = (unsigned char*)malloc(3*width*height*sizeof(unsigned char));
-	//_cmp1::kanadeTranslate(t1, vx, vy, width, height);
-	//_cmp2::kanadeTranslate(t2, ceil(vx), ceil(vy), width, height);
+	_cmp1::kanadeTranslate(t1, vx, vy, width, height);
+	_cmp2::kanadeTranslate(t2, vx, vy, width, height);
 
-	_current::kanadeTranslate(t1, vx, vy, width, height);
-	_current::kanadeTranslate(t2, ceil(vx), ceil(vy), width, height);
+	//_current::kanadeTranslate(t1, vx, vy, width, height);
+	//_current::kanadeTranslate(t2, ceil(vx), ceil(vy), width, height);
 	
 	float md[3] = {0};
 
@@ -131,8 +131,7 @@ void kanadeTestTranslate(unsigned char* target, float vx, float vy, unsigned wid
 			{
 				//if (abs(t1[3*pos+c] - t2[3*pos+c]) > md[c])
 				//	md[c] = abs(t1[3*pos+c] - t2[3*pos+c]);
-				//target[3*pos+c] = (unsigned char)(abs(t1[3*pos+c] - t2[3*pos+c]));
-				target[3*pos+c] = t1[3*pos+c];
+				target[3*pos+c] = (unsigned char)(abs(t1[3*pos+c] - t2[3*pos+c]));
 			}
 		}
 

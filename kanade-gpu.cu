@@ -12,8 +12,7 @@ unsigned char* ioFrame32 = NULL;									// pamiec pod ramke 32b - uzywana na we
 unsigned char* ioFrame8[PYRAMID_SIZE] = { NULL };					// pamiec pod piramide ramke 8b  - uzywana na wejsciu jako tymczasowa dla tekstury
 unsigned char* prevFrame8[PYRAMID_SIZE] = { NULL };					// poprzednia piramida ramek w formacie osmiobitowym - do wyliczania dt
 
-unsigned char* gframe;												// ramki w skali szarosci do algorytmu L-K
-unsigned char* gref;
+unsigned char* gpuFrame;											// ramka oryginalna, ktora bedzie uzywana do przesuwania
 
 float* devDx = NULL;												// pamiec na skladowe dx, dy i dt
 float* devDy = NULL;
@@ -84,7 +83,7 @@ __global__ void build_pyramid_level(unsigned char* prevLvl8b, unsigned char* new
 		 (unsigned)prevLvl8b[np+width] + (unsigned)prevLvl8b[np+width+1]) / 4);
 }
 
-__global__ void translate(float vx, float vy, unsigned char* frame24, unsigned width, unsigned height)
+__global__ void translate(float vx, float vy, unsigned char* input24, unsigned char* output24, unsigned width, unsigned height)
 {
 	int x = blockIdx.x*blockDim.x + threadIdx.x;
 	int y = blockIdx.y*blockDim.y + threadIdx.y;
@@ -92,13 +91,52 @@ __global__ void translate(float vx, float vy, unsigned char* frame24, unsigned w
 	// zezwol tylko na wartosci z poprawnego zakresu
 	if (x >= width || y >= height) return;
 
-	uchar4 c = tex2D(frameTex, x - vx, y - vy);
+	// werja nearest neighbour
+	int dx = (int) round(vx);					
+	int dy = (int) round(vy);
+
+	unsigned dpos = 3*(y * width + x);
+
+	if (x-dx >= 0 && y-dy >= 0 && x-dx < width-1 && y-dy < height-1)
+	{
+		unsigned spos = 3*((y - dy) * width + x - dx);
+		for (unsigned c=0; c<3; c++) 
+		{
+			output24[dpos+c] = input24[spos+c];
+		}
+	}
+
+	// wersja interpolujaca
+/*
+	int dx = (int) floor(vx);					// @todo: te obliczenia mozna sprobowac wykonac na cpu i wrzucic do pamieci stalej
+	int dy = (int) floor(vy);
+
+	double nx = vx - floor(vx);					// nx - fraction of the next pixel in x taken into interpolation
+	double ny = vy - floor(vy);
+	double tx = 1 - nx;							// tx - fraction of thix pixel taken into interpolation
+	double ty = 1 - ny;
+
+	unsigned dpos = 3*(y * width + x);
+
+	if (x-dx >= 0 && y-dy >= 0 && x-dx < width-1 && y-dy < height-1)
+	{
+		unsigned spos = 3*((y - dy) * width + x - dx);
+		for (unsigned c=0; c<3; c++) 
+		{
+			float y1 = (tx * input24[spos+c] + nx * input24[spos+c+3]);
+			float y2 = (tx * input24[spos+c+3*width] + nx * input24[spos+c+3*width+3]);
+
+			output24[dpos+c] = (unsigned char)(ty * y1 + ny * y2);
+		}
+	}
+*/
+	//uchar4 c = tex2D(frameTex, x - vx, y - vy);
 
 	// @todo: to mozna zrobic wydajniej przy uzyciu pamieci dzielonej
-	int pos = 3*(y*width + x);
-	frame24[pos] = c.x;
-	frame24[pos+1] =  c.y;
-	frame24[pos+2] =  c.z;
+	//int pos = 3*(y*width + x);
+	//output24[pos] = c.x;
+	//output24[pos+1] =  c.y;
+	//output24[pos+2] =  c.z;
 }
 
 __global__ void calculate_dxdy(unsigned char* frame8, float* dx, float* dy, unsigned width, unsigned height)
@@ -253,6 +291,9 @@ void allocateMemoryIfNeeded(unsigned width, unsigned height)
 	if (ioFrame32 == NULL)
 		checkCudaErrors(cudaMalloc(&ioFrame32, 4 * width * height * sizeof(unsigned char))); 
 
+	if (gpuFrame == NULL)
+		checkCudaErrors(cudaMalloc(&gpuFrame, 3 * width * height * sizeof(unsigned char))); 
+
 	if (devDx == NULL)
 		checkCudaErrors(cudaMalloc(&devDx, width * height * sizeof(float))); 
 
@@ -300,12 +341,15 @@ void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height)
 	prepareFrame<<<(width*height + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, ioFrame32, ioFrame8[0], width, height);
 	checkCudaErrors(cudaGetLastError());
 
+	checkCudaErrors(cudaMemcpy(gpuFrame, ioFrame24, 3 * width * height * sizeof(unsigned char), cudaMemcpyDeviceToDevice));
+
 	// przygotuj tekstury
-	cudaChannelFormatDesc desc24b = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindUnsigned); 	 
+	/*cudaChannelFormatDesc desc24b = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindUnsigned); 	 
 	checkCudaErrors(cudaMallocArray(&frameTexMem, &desc24b, width, height)); 
 	checkCudaErrors(cudaDeviceSynchronize());	
 	checkCudaErrors(cudaMemcpyToArray(frameTexMem, 0, 0, ioFrame32, 4 * width * height * sizeof(unsigned char), cudaMemcpyDeviceToDevice)); 
-	checkCudaErrors(cudaBindTextureToArray(frameTex, frameTexMem, desc24b)); 
+	checkCudaErrors(cudaBindTextureToArray(frameTex, frameTexMem, desc24b)); */
+	
 }
 
 void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYRAMID_SIZE])
@@ -339,7 +383,7 @@ void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, 
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 
 	cudaMemset(ioFrame24, 0, 3*width*height*sizeof(unsigned char));
-	translate<<<dimGrid, dimBlock>>>(vx, vy, ioFrame24, width, height);
+	translate<<<dimGrid, dimBlock>>>(vx, vy, gpuFrame, ioFrame24, width, height);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaMemcpy(target, ioFrame24, 3 * width * height * sizeof(unsigned char), cudaMemcpyDeviceToHost));
 }
@@ -422,6 +466,9 @@ void kanadeCleanup()
 
 	if (ioFrame32 != NULL)
 		cudaFree(ioFrame32);
+
+	if (gpuFrame != NULL)
+		cudaFree(gpuFrame);
 
 	if (devDx != NULL)
 		cudaFree(devDx);

@@ -26,6 +26,13 @@ inline std::string toString(T val)
 	return res;
 }
 
+#ifdef _WIN32
+inline float roundf(float d)
+{
+	return floor( d + 0.5 );
+}
+#endif
+
 
 void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height)
 {
@@ -117,35 +124,46 @@ struct color
 
 void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height)
 {
+	int dx = (int) roundf(vx);
+	int dy = (int) roundf(vy);					// interpolacja nearest neighbour
+/*
 	int dx = (int) floor(vx);
 	int dy = (int) floor(vy);
 
-	double nx = vx - floor(vx);					// nx - fraction of the next pixel in x taken into interpolation
-	double ny = vy - floor(vy);
-	double tx = 1 - nx;							// tx - fraction of thix pixel taken into interpolation
-	double ty = 1 - ny;
-
-	color* frame = (color*)ioFrame24;
+	float nx = vx - floor(vx);					// nx - fraction of the next pixel in x taken into interpolation
+	float ny = vy - floor(vy);
+	float tx = 1 - nx;							// tx - fraction of thix pixel taken into interpolation
+	float ty = 1 - ny;
+*/
+	memset(target, 0, 3*width*height*sizeof(unsigned char));
 
 	for (unsigned x=0; x<width; x++)
 		for (unsigned y=0; y<height; y++)
 		{
-			unsigned dpos = y * width + x;
-			if (x-dx < 0 || y-dy < 0 || x-dx >= width-1 || y-dy >= height-1)
+			unsigned dpos = 3*(y * width + x);
+
+			if (x-dx >= 0 && y-dy >= 0 && x-dx < width-1 && y-dy < height-1)
 			{
-				// take the original pixel
+				// to ponizej to nie jest bilinear interpolation a raczej wtf interpolation
+				//unsigned spos = (y - dy) * width + x - dx;
 				//for (unsigned c=0; c<3; c++)
-				//	target[3*dpos+c] = ioFrame24[3*dpos+c];
-				// take black pixel
-				for (unsigned c=0; c<3; c++)
-					target[3*dpos+c] = 0;
-			}
-			else
-			{
-				unsigned spos = (y - dy) * width + x - dx;
-				for (unsigned c=0; c<3; c++)
-					target[3*dpos+c] = (unsigned char)((tx * frame[spos][c] + nx * frame[spos + 1][c]) / 2.0f
-									        + (ty * frame[spos][c] + ny * frame[spos + width][c]) / 2.0f);
+				//	target[3*dpos+c] = (unsigned char)((tx * frame[spos][c] + nx * frame[spos + 1][c]) / 2.0f
+				//					        + (ty * frame[spos][c] + ny * frame[spos + width][c]) / 2.0f);
+			
+				// poprawna interpolacja dwuliniowa (ale i tak z niej nie korzystamy poki co)
+				/*unsigned spos = 3*((y - dy) * width + x - dx);
+				for (unsigned c=0; c<3; c++) 
+				{
+					float y1 = (tx * ioFrame24[spos+c] + nx * ioFrame24[spos+c+3]);
+					float y2 = (tx * ioFrame24[spos+c+3*width] + nx * ioFrame24[spos+c+3*width+3]);
+	
+					target[dpos+c] = (unsigned char)(ty * y1 + ny * y2);
+				}*/
+
+				// interpolacja nearest neighbour
+				unsigned spos = 3*((y - dy) * width + x - dx);
+				for (unsigned c=0; c<3; c++) 
+					target[dpos+c] = ioFrame24[spos+c];
 			}
 		}
 

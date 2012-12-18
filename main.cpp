@@ -67,8 +67,8 @@ int main()
 	// poki co nie pisz pierwszej klatki
 	output.WriteVideoFrame((unsigned char*)frame.pFrame->data[0], frame.width, frame.height);
 
-	//kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);
-	kanadeTestInit(frame.pFrame->data[0], frame.width, frame.height);
+	kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);
+	//kanadeTestInit(frame.pFrame->data[0], frame.width, frame.height);
 
 	unsigned char* result8 = (unsigned char*)malloc(frame.width*frame.height*sizeof(unsigned char));
 	unsigned char* result24 = (unsigned char*)malloc(frame.width*frame.height*3*sizeof(unsigned char));
@@ -78,19 +78,19 @@ int main()
 	{
 		if (rfr == MFFMpegInput::RFR_OK)								// was the frame parsed ok?
 		{			
-			//kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);			
-			//kanadeExecute(result24, frame.width, frame.height);
+			kanadeNextFrame(frame.pFrame->data[0], frame.width, frame.height);			
+			kanadeExecute(result24, frame.width, frame.height);
 			
-			kanadeTestNextFrame(frame.pFrame->data[0], frame.width, frame.height);			
+			//kanadeTestNextFrame(frame.pFrame->data[0], frame.width, frame.height);			
 			//kanadeTestCompareBuildPyramid(result8, frame.width, frame.height);
 			//kanadeTestGenerateG(result8, frame.width, frame.height);			
 			//kanadeTestGenerateB(result8, frame.width, frame.height);
 			//kanadeTestBuildPyramid(result8, frame.width, frame.height);
 			//kanade8to24(result24, result8, frame.width, frame.height);
-			kanadeTestTranslate(result24, 100.2f, 100.2f, frame.width, frame.height);
-			kanadeTestPrepareForNextFrame();
+			//kanadeTestTranslate(result24, 10.2f, 10.2f, frame.width, frame.height);
+			//kanadeTestPrepareForNextFrame();
 
-		//	system("pause");
+			//system("pause");
 
 			output.WriteVideoFrame(result24, frame.width, frame.height);
 			
