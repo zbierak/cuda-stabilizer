@@ -46,6 +46,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				AdditionalOptions="-DKANADE_NO_GPU1"
 				Optimization="0"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -110,6 +111,7 @@
 				Name="Cudart Build Rule"
 				Arch1="30"
 				Arch2="0"
+				Arch3="0"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"

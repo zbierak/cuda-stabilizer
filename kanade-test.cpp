@@ -111,6 +111,37 @@ void kanadeTestCompareBuildPyramid(unsigned char* target, unsigned width, unsign
 	}
 }
 
+void kanadeTestTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height)
+{
+	unsigned char* t1 = (unsigned char*)malloc(3*width*height*sizeof(unsigned char));
+	unsigned char* t2 = (unsigned char*)malloc(3*width*height*sizeof(unsigned char));
+	//_cmp1::kanadeTranslate(t1, vx, vy, width, height);
+	//_cmp2::kanadeTranslate(t2, ceil(vx), ceil(vy), width, height);
+
+	_current::kanadeTranslate(t1, vx, vy, width, height);
+	_current::kanadeTranslate(t2, ceil(vx), ceil(vy), width, height);
+	
+	float md[3] = {0};
+
+	for (unsigned y=0; y<height; y++)
+		for (unsigned x=0; x<width; x++)
+		{
+			unsigned pos = y*width+x;
+			for (unsigned c=0; c<3; c++)
+			{
+				//if (abs(t1[3*pos+c] - t2[3*pos+c]) > md[c])
+				//	md[c] = abs(t1[3*pos+c] - t2[3*pos+c]);
+				//target[3*pos+c] = (unsigned char)(abs(t1[3*pos+c] - t2[3*pos+c]));
+				target[3*pos+c] = t1[3*pos+c];
+			}
+		}
+
+	//std::cout << "Trans R: " << md[0] << ", G: " << md[1] << ", B: " << md[2] << std::endl;
+
+	free(t1);
+	free(t2);
+}
+
 void kanadeTestGenerateG(unsigned char* target, unsigned width, unsigned height)
 {
 	buildPyramid(width, height);
@@ -212,7 +243,7 @@ void kanadeTestGenerateB(unsigned char* target, unsigned width, unsigned height)
 				for (unsigned x=0; x<getPyrWidth(i); x++)
 				{
 					unsigned pos = y*getPyrWidth(i)+x;
-					target[pos] = abs(t1[pos] - t2[pos]);
+					target[pos] = (unsigned char) abs(t1[pos] - t2[pos]);
 				}
 		}
 
@@ -221,5 +252,35 @@ void kanadeTestGenerateB(unsigned char* target, unsigned width, unsigned height)
 
 		std::cout << "Pyramid level " << i << ",\tmax dt error=" << err << std::endl;
 		std::cout << "\t|bx| = " << abs(bx1 - bx2) << "\t|by| = " << abs(by1 - by2) << std::endl;
+	}
+}
+
+void kanadeTestPrepareForNextFrame()
+{
+	#ifndef KANADE_NO_RFRAME_UPDATE
+	
+	unsigned pyrWidth[PYRAMID_SIZE];
+	unsigned pyrHeight[PYRAMID_SIZE];
+
+	for (unsigned i=0; i<PYRAMID_SIZE; i++) 
+	{
+		pyrWidth[i] = getPyrWidth(i);
+		pyrHeight[i] = getPyrHeight(i);
+	}
+
+	_cmp1::kanadePrepareForNextFrame(pyrWidth, pyrHeight);
+	_cmp2::kanadePrepareForNextFrame(pyrWidth, pyrHeight);
+	
+	#endif
+}
+
+void kanadeTestInit(unsigned char* pixels, unsigned width, unsigned height)
+{
+	kanadeTestNextFrame(pixels, width, height);
+	buildPyramid(width, height);
+	for (unsigned i=1; i<PYRAMID_SIZE; i++) 
+	{
+		_cmp1::kanadeBuildPyramidLevel(i, getPyrWidth(i), getPyrHeight(i));
+		_cmp2::kanadeBuildPyramidLevel(i, getPyrWidth(i), getPyrHeight(i));
 	}
 }

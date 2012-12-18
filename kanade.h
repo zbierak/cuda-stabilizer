@@ -18,6 +18,9 @@ void kanadeTestBuildPyramid(unsigned char* target, unsigned width, unsigned heig
 void kanadeTestCompareBuildPyramid(unsigned char* target, unsigned width, unsigned height);
 void kanadeTestGenerateG(unsigned char* target, unsigned width, unsigned height);
 void kanadeTestGenerateB(unsigned char* target, unsigned width, unsigned height);
+void kanadeTestPrepareForNextFrame();
+void kanadeTestInit(unsigned char* pixels, unsigned width, unsigned height);
+void kanadeTestTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height);
 
 // utility functions
 void kanade8to24(unsigned char* target, unsigned char* src, unsigned width, unsigned height);

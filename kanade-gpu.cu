@@ -321,7 +321,6 @@ void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYR
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	// prepare other pyramid levels
-
 	for (unsigned i=1; i<PYRAMID_SIZE; i++)
 	{
 		dim3 dimGrid((width[i] + BLOCK_DIM - 1) / BLOCK_DIM, (height[i] + BLOCK_DIM - 1) / BLOCK_DIM);	

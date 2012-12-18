@@ -117,10 +117,6 @@ struct color
 
 void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, unsigned height)
 {
-	// this implementation is the reverse of the gpu, one had to be taken
-	vx = -vx;
-	vy = -vy; 
-
 	int dx = (int) floor(vx);
 	int dy = (int) floor(vy);
 
@@ -135,7 +131,7 @@ void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, 
 		for (unsigned y=0; y<height; y++)
 		{
 			unsigned dpos = y * width + x;
-			if (x+dx < 0 || y+dy < 0 || x+dx >= width-1 || y+dy >= height-1)
+			if (x-dx < 0 || y-dy < 0 || x-dx >= width-1 || y-dy >= height-1)
 			{
 				// take the original pixel
 				//for (unsigned c=0; c<3; c++)
@@ -146,7 +142,7 @@ void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, 
 			}
 			else
 			{
-				unsigned spos = (y + dy) * width + x + dx;
+				unsigned spos = (y - dy) * width + x - dx;
 				for (unsigned c=0; c<3; c++)
 					target[3*dpos+c] = (unsigned char)((tx * frame[spos][c] + nx * frame[spos + 1][c]) / 2.0f
 									        + (ty * frame[spos][c] + ny * frame[spos + width][c]) / 2.0f);

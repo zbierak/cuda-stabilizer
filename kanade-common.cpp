@@ -53,7 +53,7 @@ void executeOnPyramidLevel(unsigned lvl, float& vx, float& vy)
 	float l1 = (-(dxdx+dydy) - sqrt(delta))/2;
 	float l2 = (-(dxdx+dydy) + sqrt(delta))/2;
 
-	//std::cout << "L=" << lvl << "\tdxdx=" << dxdx << "\tdxdy=" << dxdy << "\tdydy=" << dydy << std::endl;
+	std::cout << "L=" << lvl << "\tdxdx=" << dxdx << "\tdxdy=" << dxdy << "\tdydy=" << dydy << std::endl;
 
 	for (unsigned it=0; it<ITERATION_COUNT; ++it)
 	{
@@ -102,7 +102,7 @@ void kanadeExecute(unsigned char* target, unsigned width, unsigned height)
 	}
 	estTime += estT.stop();
 
-	//std::cout << "Vx: " << vx << " Vy: " << vy << std::endl;
+	std::cout << "Vx: " << vx << " Vy: " << vy << std::endl;
 
 	Timer transT;
 	_current::kanadeTranslate(target, -vx, -vy, width, height);
