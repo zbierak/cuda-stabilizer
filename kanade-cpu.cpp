@@ -176,10 +176,10 @@ void translateGrayscale(unsigned char* target, float vx, float vy, unsigned pyrL
 	int dx = (int) floor(vx);
 	int dy = (int) floor(vy);
 
-	double nx = vx - floor(vx);				// nx - fraction of the next pixel in x taken into interpolation
-	double ny = vy - floor(vy);
-	double tx = 1 - nx;						// tx - fraction of thix pixel taken into interpolation
-	double ty = 1 - ny;
+	float nx = vx - floor(vx);				// nx - fraction of the next pixel in x taken into interpolation
+	float ny = vy - floor(vy);
+	float tx = 1 - nx;						// tx - fraction of thix pixel taken into interpolation
+	float ty = 1 - ny;
 
 	for (unsigned x=0; x<width; x++)
 		for (unsigned y=0; y<height; y++)
@@ -193,8 +193,10 @@ void translateGrayscale(unsigned char* target, float vx, float vy, unsigned pyrL
 			else
 			{
 				unsigned spos = (y + dy) * width + x + dx;
-				target[dpos] = (unsigned char)((tx * ioFrame8[pyrLvl][spos] + nx * ioFrame8[pyrLvl][spos + 1]) / 2.0
-									   + (ty * ioFrame8[pyrLvl][spos] + ny * ioFrame8[pyrLvl][spos + width]) / 2.0);
+
+				float y1 = (tx * ioFrame8[pyrLvl][spos] + nx * ioFrame8[pyrLvl][spos+1]);
+				float y2 = (tx * ioFrame8[pyrLvl][spos+width] + nx * ioFrame8[pyrLvl][spos+width+1]);
+				target[dpos] = (unsigned char)(ty * y1 + ny * y2);
 			}
 		}
 }

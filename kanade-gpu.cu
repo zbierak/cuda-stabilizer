@@ -3,12 +3,12 @@
 namespace kgpu {
 
 const unsigned BLOCK_DIM = 32;
+const unsigned BLOCK_DIM_SQ = BLOCK_DIM * BLOCK_DIM;
 
 #include "kanade.h"
 #include "helper_cuda.h"
 
 unsigned char* ioFrame24 = NULL;									// pamiec pod ramke 24b - uzywana na wejsciu i wyjsciu
-unsigned char* ioFrame32 = NULL;									// pamiec pod ramke 32b - uzywana na wejsciu jako tymczasowa dla tekstury
 unsigned char* ioFrame8[PYRAMID_SIZE] = { NULL };					// pamiec pod piramide ramke 8b  - uzywana na wejsciu jako tymczasowa dla tekstury
 unsigned char* prevFrame8[PYRAMID_SIZE] = { NULL };					// poprzednia piramida ramek w formacie osmiobitowym - do wyliczania dt
 
@@ -42,9 +42,32 @@ __device__ inline unsigned char toColor<unsigned>(unsigned value)
 	return (unsigned char) value;
 }
 
-__global__ void prepareFrame(unsigned char* frame24, unsigned char* frame32, unsigned char* frame8, unsigned width, unsigned height)
+/*
+// shared memory version with coalescing - works slower than the second one
+__global__ void toGrayscale(unsigned char* frame24, unsigned char* frame8, unsigned width, unsigned height)
 {
-	// @todo: cala te funkcje mozna zrobic wydajniej przy uzyciu pamieci dzielonej
+	__shared__ float colors[3*BLOCK_DIM];
+
+	int pos = blockIdx.x*blockDim.x + threadIdx.x;
+	colors[threadIdx.x] = frame24[pos];
+	colors[threadIdx.x + BLOCK_DIM] = frame24[pos+BLOCK_DIM];
+	colors[threadIdx.x + 2*BLOCK_DIM] = frame24[pos+2*BLOCK_DIM];
+
+	__syncthreads();
+
+	if (pos >= width*height) return;
+
+	unsigned char r = colors[3*threadIdx.x];
+	unsigned char g = colors[3*threadIdx.x+1];
+	unsigned char b = colors[3*threadIdx.x+2];
+
+	frame8[pos] = MAX(MAX(r, g), b);		
+}
+*/
+
+__global__ void toGrayscale(unsigned char* frame24, unsigned char* frame8, unsigned width, unsigned height)
+{
+	// this version has limited coalescing, but works faster than the one with shared memory
 
 	int pos = blockIdx.x*blockDim.x + threadIdx.x;
 	if (pos >= width*height) return;
@@ -56,15 +79,7 @@ __global__ void prepareFrame(unsigned char* frame24, unsigned char* frame32, uns
 	// konwersja na skale szarosci wg. jasnosci piksela
 	//frame8[pos] = toColor(floor(0.299f * r + 0.587 * g + 0.114 * b));		// ten sposob (przeksztalcenie na YUV) powodowal bledy miedzy implementacja CPU a GPU
 	//frame8[pos] = toColor(floor((r + g + b)/3.0f));
-	frame8[pos] = MAX(MAX(r, g), b);
-	
-	// konwersja formatu 24b na 32b dla kompatybilnosci z teksturami (wartosc alfa jest zerowana przed wywolaniem)
-	if (frame32 != NULL)
-	{
-		frame32[4*pos] = r;
-		frame32[4*pos+1] = g;
-		frame32[4*pos+2] = b;
-	}
+	frame8[pos] = MAX(MAX(r, g), b);	
 }
 
 __global__ void build_pyramid_level(unsigned char* prevLvl8b, unsigned char* newLvl8b, unsigned newWidth, unsigned newHeight)
@@ -123,13 +138,9 @@ __global__ void calculate_dxdy(unsigned char* frame8, float* dx, float* dy, unsi
 	int pos = y*width + x;
 	if (x != 0 && x != width-1)
 		dx[pos] = ((float)(frame8[pos+1]-frame8[pos-1])) / 2.0f;
-	else
-		dx[pos] = 0;
 
 	if (y != 0 && y != height-1)
 		dy[pos] = ((float)(frame8[pos+width]-frame8[pos-width])) / 2.0f;
-	else
-		dy[pos] = 0;	
 }
 
 __global__ void calculate_dt(unsigned pyrLvl, float vx, float vy, unsigned char* prevFrame8b, unsigned char* currFrame8b, float* dt, unsigned width, unsigned height)
@@ -143,21 +154,70 @@ __global__ void calculate_dt(unsigned pyrLvl, float vx, float vy, unsigned char*
 	int dx = (int) floor(vx);
 	int dy = (int) floor(vy);
 
-	double nx = vx - floor(vx);					// fractions of the next pixel taken into interpolation
-	double ny = vy - floor(vy);
-	double tx = 1 - nx;							// fraction of this pixel taken into interpolation
-	double ty = 1 - ny;
+	float nx = vx - floor(vx);					// fractions of the next pixel taken into interpolation
+	float ny = vy - floor(vy);
+	float tx = 1 - nx;							// fraction of this pixel taken into interpolation
+	float ty = 1 - ny;
 	
 	float interpolated = 0;
 	if (x+dx >= 0 && y+dy >= 0 && x+dx < width-1 && y+dy < height-1)
 	{
 		unsigned spos = (y + dy) * width + x + dx;
-		interpolated = (unsigned char)((tx * currFrame8b[spos] + nx * currFrame8b[spos + 1] + ty * currFrame8b[spos] + ny * currFrame8b[spos + width]) / 2.0f);		// na 2 a nie na 4, bo korzystamy z "polkolorow" (w punkcie srodkowym kazdy kolor jest mnozony przez 0.5)
+
+		float y1 = (tx * currFrame8b[spos] + nx * currFrame8b[spos+1]);
+		float y2 = (tx * currFrame8b[spos+width] + nx * currFrame8b[spos+width+1]);
+
+		interpolated = (unsigned char)(ty * y1 + ny * y2);
 	}
 
 	int dpos = y*width + x;
 	dt[dpos] = (float)prevFrame8b[dpos] - interpolated;
 }
+
+/*
+// an approach to shared memory - slower than the previous, only partly coalesced implementation
+__global__ void calculate_dt(unsigned pyrLvl, float vx, float vy, unsigned char* prevFrame8b, unsigned char* currFrame8b, float* dt, unsigned width, unsigned height)
+{
+	int x = blockIdx.x*blockDim.x + threadIdx.x;
+	int y = blockIdx.y*blockDim.y + threadIdx.y;
+
+	__shared__ float lo_colors[2*BLOCK_DIM_SQ];
+	__shared__ float hi_colors[2*BLOCK_DIM_SQ];
+	
+	// zezwol tylko na wartosci z poprawnego zakresu
+	if (x >= width || y >= height) return;
+
+	int dx = (int) floor(vx);
+	int dy = (int) floor(vy);
+
+	float nx = vx - floor(vx);					// fractions of the next pixel taken into interpolation
+	float ny = vy - floor(vy);
+	float tx = 1 - nx;							// fraction of this pixel taken into interpolation
+	float ty = 1 - ny;
+	
+	float interpolated = 0;
+	if (x+dx >= 0 && y+dy >= 0 && x+dx < width-1 && y+dy < height-1)
+	{
+		unsigned spos = (y + dy) * width + x + dx;
+		unsigned bpos = threadIdx.y*blockDim.x + threadIdx.x;
+
+		lo_colors[bpos] = currFrame8b[spos];
+		lo_colors[bpos+BLOCK_DIM_SQ] = currFrame8b[spos+BLOCK_DIM_SQ];
+		hi_colors[bpos] = currFrame8b[spos+width];
+		hi_colors[bpos+BLOCK_DIM_SQ] = currFrame8b[spos+width+BLOCK_DIM_SQ];
+
+		__syncthreads();
+
+		float y1 = tx * lo_colors[bpos] + nx * lo_colors[bpos+1];
+		float y2 = tx * hi_colors[bpos] + nx * hi_colors[bpos+1];
+
+		interpolated = (unsigned char)(ty * y1 + ny * y2);
+	}
+
+	int dpos = y*width + x;
+	dt[dpos] = (float)prevFrame8b[dpos] - interpolated;
+}
+*/
 
 __global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
 {
@@ -192,7 +252,6 @@ __global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, floa
 		atomicAdd(dxdy, s_dxdy);
 		atomicAdd(dydy, s_dydy);
 	}
-	
 }
 
 __global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* by)
@@ -242,9 +301,6 @@ void allocateMemoryIfNeeded(unsigned width, unsigned height)
 			checkCudaErrors(cudaMalloc(&ioFrame8[i], width * height * sizeof(unsigned char))); 
 	}
 		
-	if (ioFrame32 == NULL)
-		checkCudaErrors(cudaMalloc(&ioFrame32, 4 * width * height * sizeof(unsigned char))); 
-
 	if (gpuFrame == NULL)
 		checkCudaErrors(cudaMalloc(&gpuFrame, 3 * width * height * sizeof(unsigned char))); 
 
@@ -289,8 +345,7 @@ void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height)
 
 	// przygotuj dane wejsciowe pod tekstury
 	checkCudaErrors(cudaMemcpy(ioFrame24, pixels, 3 * width * height * sizeof(unsigned char), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemset(ioFrame32, 0, 4 * width * height * sizeof(unsigned char)));
-	prepareFrame<<<(width*height + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, ioFrame32, ioFrame8[0], width, height);
+	toGrayscale<<<(width*height + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, ioFrame8[0], width, height);
 	checkCudaErrors(cudaGetLastError());
 
 	checkCudaErrors(cudaMemcpy(gpuFrame, ioFrame24, 3 * width * height * sizeof(unsigned char), cudaMemcpyDeviceToDevice));	
@@ -305,7 +360,7 @@ void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYR
 	 */
 
 	// prepare pyramid level zero
-	prepareFrame<<<(width[0]*height[0] + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, NULL, prevFrame8[0], width[0], height[0]);
+	toGrayscale<<<(width[0]*height[0] + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, prevFrame8[0], width[0], height[0]);
 	checkCudaErrors(cudaDeviceSynchronize());
 
 	// prepare other pyramid levels
@@ -344,13 +399,12 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 	calculate_dxdy<<<dimGrid, dimBlock>>>(prevFrame8[pyrLvl], devDx, devDy, width, height);
+	checkCudaErrors(cudaMemset(devG, 0, 3 * sizeof(float)));
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	checkCudaErrors(cudaMemset(devG, 0, 3 * sizeof(float)));
 	reduce_to_g<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, &devG[0], &devG[1], &devG[2], sizeAligned);
 	checkCudaErrors(cudaGetLastError());
 
-	checkCudaErrors(cudaDeviceSynchronize());
 	checkCudaErrors(cudaMemcpy(cpuG, devG, 3 * sizeof(float), cudaMemcpyDeviceToHost));
 	dxdx = cpuG[0];
 	dxdy = cpuG[1];
@@ -367,9 +421,9 @@ void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsig
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 	calculate_dt<<<dimGrid, dimBlock>>>(pyrLvl, vx, vy, prevFrame8[pyrLvl], ioFrame8[pyrLvl], devDt, width, height);
-	checkCudaErrors(cudaDeviceSynchronize());
-
 	checkCudaErrors(cudaMemset(devB, 0, 2 * sizeof(float)));
+	checkCudaErrors(cudaDeviceSynchronize());
+	
 	reduce_to_b<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, devDt, &devB[0], &devB[1]);
 
 	checkCudaErrors(cudaMemcpy(cpuB, devB, 2 * sizeof(float), cudaMemcpyDeviceToHost));
@@ -397,6 +451,8 @@ void kanadeInit()
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, devID));
     printf("GPU Device %d: \"%s\" with compute capability %d.%d\n\n", devID, deviceProp.name, deviceProp.major, deviceProp.minor);	
 
+	checkCudaErrors(cudaSetDeviceFlags(cudaDeviceMapHost));
+
 	checkCudaErrors(cudaMalloc(&devG, 3 * sizeof(float))); 
 	checkCudaErrors(cudaMalloc(&devB, 2 * sizeof(float))); 
 	
@@ -416,9 +472,6 @@ void kanadeCleanup()
 
 	if (ioFrame24 != NULL)
 		cudaFree(ioFrame24);
-
-	if (ioFrame32 != NULL)
-		cudaFree(ioFrame32);
 
 	if (gpuFrame != NULL)
 		cudaFree(gpuFrame);
