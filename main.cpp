@@ -95,14 +95,11 @@ int main()
 			output.WriteVideoFrame(result24, frame.width, frame.height);
 			
 			cout << ".";
-
-			
 		}
 	}
 
 	free(result8);
 	free(result24);
-
 
 	cout << endl;	
 

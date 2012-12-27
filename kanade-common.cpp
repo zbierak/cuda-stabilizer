@@ -201,7 +201,7 @@ void kanadePrintStats()
 	double other = tt - pyrTime - estTime - transTime;
 
 	std::cout << std::endl;
-	std::cout << "Total execution time: " << tt << "s (" << tt/frameCount << " s per frame), out of which:" << std::endl;
+	std::cout << "Total execution time: " << tt << "s (" << tt/frameCount << " s per frame, " << frameCount / tt << " fps), out of which:" << std::endl;
 	std::cout << "    frame loading & pyr building: " << pyrTime << "s (" << (int)(100*pyrTime/tt) << "%)" << std::endl;
 	std::cout << "    estimation:                   " << estTime << "s (" << (int)(100*estTime/tt) << "%), out of which:" << std::endl;
 	std::cout << "        g matrix computation:     " << gTime << "s (" << (int)(100*gTime/estTime) << "%)" << std::endl;

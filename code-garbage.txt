@@ -1,0 +1,145 @@
+This file contains some (perhaps someday useful) code insights taken from the project (mainly kanade-gpu.cu)
+
+-------------------------------------------------------- REDUCE TO G
+
+// this version uses other approach with no atomic operations. Replaced for simplicity
+
+__device__ unsigned int kernel_block_counter = 0;
+__shared__ bool kernel_last_block_done;
+
+__device__ float g_partial_sum(float* dx, float* dy)
+{
+	__shared__ float t_dxdx[BLOCK_DIM];
+	__shared__ float t_dxdy[BLOCK_DIM];
+	__shared__ float t_dydy[BLOCK_DIM];
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dx = dx[idx];
+	float l_dy = dy[idx];
+
+	t_dxdx[threadIdx.x] = l_dx * l_dx;
+	t_dxdy[threadIdx.x] = l_dx * l_dy;
+	t_dydy[threadIdx.x] = l_dy * l_dy;
+
+	__syncthreads();
+
+	int nTotalThreads = blockDim.x;					 
+	while (nTotalThreads > 1)
+	{
+		int halfPoint = (nTotalThreads >> 1);	// divide by two		
+ 
+		if (threadIdx.x < halfPoint)
+		    t_dxdx[threadIdx.x] += t_dxdx[threadIdx.x + halfPoint];
+ 
+		__syncthreads();
+ 
+		nTotalThreads = halfPoint;
+	}
+
+	return t_dxdx[0];
+}
+
+__device__ float g_total_sum(float* dxdx, float* dxdy, float* dydy)
+{
+	float sum = 0;
+	for (int i=0; i<gridDim.x; i++)
+		sum += dxdx[i];
+	return sum;
+}
+
+__global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
+{
+	float partialSum = g_partial_sum(dx, dy);
+	if (threadIdx.x == 0)
+	{
+		dxdx[blockIdx.x] = partialSum;
+		__threadfence();
+		unsigned int value = atomicInc(&kernel_block_counter, gridDim.x);
+		kernel_last_block_done = (value == (gridDim.x - 1));
+	}
+
+	__syncthreads();
+
+	if (kernel_last_block_done) 
+	{
+		float totalSum = g_total_sum(dxdx, dxdy, dydy);
+		if (threadIdx.x == 0) 
+		{
+			dxdx[0] = totalSum;
+			kernel_block_counter = 0;
+		}
+	}
+
+	
+}
+
+-------------------------------------------------------- SIMPLE ATOMIC REDUCE TO G
+
+int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float s1 = dx[idx]*dx[idx];
+	float s2 = dx[idx]*dy[idx];
+	float s3 = dy[idx]*dy[idx];
+	atomicAdd(dxdx,s1);
+	atomicAdd(dxdy,s2);
+	atomicAdd(dydy,s3);
+	
+-------------------------------------------------------- TRANSLATE INTERPOLATING VERSION
+
+	int dx = (int) floor(vx);					// @todo: te obliczenia mozna sprobowac wykonac na cpu i wrzucic do pamieci stalej
+	int dy = (int) floor(vy);
+
+	double nx = vx - floor(vx);					// nx - fraction of the next pixel in x taken into interpolation
+	double ny = vy - floor(vy);
+	double tx = 1 - nx;							// tx - fraction of thix pixel taken into interpolation
+	double ty = 1 - ny;
+
+	unsigned dpos = 3*(y * width + x);
+
+	if (x-dx >= 0 && y-dy >= 0 && x-dx < width-1 && y-dy < height-1)
+	{
+		unsigned spos = 3*((y - dy) * width + x - dx);
+		for (unsigned c=0; c<3; c++) 
+		{
+			float y1 = (tx * input24[spos+c] + nx * input24[spos+c+3]);
+			float y2 = (tx * input24[spos+c+3*width] + nx * input24[spos+c+3*width+3]);
+
+			output24[dpos+c] = (unsigned char)(ty * y1 + ny * y2);
+		}
+	}
+	
+-------------------------------------------------------- DOT SUM OPERATIONS
+
+// for full image operations
+template <typename T1, typename T2>
+__device__ __host__ float dotSum(T1* a, T2* b, int size)
+{
+	float sum = 0.0f;
+	for (int i=0; i<size; i++)
+		sum += a[i] * b[i];
+	return sum;
+}
+
+// for window operations
+template <typename T1, typename T2>
+__device__ __host__ float dotSum(T1* a, T2* b, int width, int height)
+{
+	float sum = 0.0f;
+	int px = width/2;
+	int py = height/2;
+
+	int sx = MAX(0, px-(int)WINDOW_SIZE_DIV_2);
+	int ex = MIN(width-1, px+WINDOW_SIZE_DIV_2);
+	int sy = MAX(0, py-(int)WINDOW_SIZE_DIV_2);
+	int ey = MIN(height-1, py+WINDOW_SIZE_DIV_2);
+
+	for (int y=sy; y<=ey; y++)
+		for (int x=sx; x<=ex; x++)
+		{
+			int pos = y*width+x;
+			sum += a[pos] * b[pos];
+		}
+	
+	return sum;
+}
