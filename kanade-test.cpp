@@ -166,13 +166,12 @@ void kanadeTestGenerateG(unsigned char* target, unsigned width, unsigned height)
 
 		_cmp1::getDevDx(t1, getPyrWidth(i), getPyrHeight(i));
 		_cmp2::getDevDx(t2, getPyrWidth(i), getPyrHeight(i));
-		
+	
 		for (unsigned pos=0; pos<size; pos++)
 		{
 			float diff = abs(t1[pos] - t2[pos]);
 			if (diff > errx)
-				errx = diff;
-
+				errx = diff;					
 		}
 
 		_cmp1::getDevDy(t1, getPyrWidth(i), getPyrHeight(i));
@@ -190,6 +189,7 @@ void kanadeTestGenerateG(unsigned char* target, unsigned width, unsigned height)
 
 		std::cout << "Pyramid level " << i << ",\tmax dx error=" << errx << ",\tmax dy error=" << erry << std::endl;
 		std::cout << "\t|dxdx| = " << abs(dxdx1 - dxdx2) << "\t|dxdy| = " << abs(dxdy1 - dxdy2) << "\t|dydy| = " << abs(dydy1 - dydy2) << std::endl;
+
 	}
 }
 

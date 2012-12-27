@@ -22,6 +22,11 @@ float* cpuDx = NULL;
 float* cpuDy = NULL;
 float* cpuDt = NULL;
 
+float* devG = NULL;
+float* devB = NULL;
+float* cpuG = NULL;
+float* cpuB = NULL;
+
 texture<uchar4, 2, cudaReadModeElementType> frameTex;				// kolorowa ramka wejœciowa do przesuwania	
 cudaArray* frameTexMem = NULL;										
 
@@ -222,52 +227,158 @@ __device__ __host__ float dotSum(T1* a, T2* b, int width, int height)
 	return sum;
 }
 
-// na chwile obecna nie wykorzystywane, bo strasznie mulilo - jesli to robic to jakos zmyslniej
+// reduce to g
+
+/*
+__device__ unsigned int kernel_block_counter = 0;
+__shared__ bool kernel_last_block_done;
+
+__device__ float g_partial_sum(float* dx, float* dy)
+{
+	__shared__ float t_dxdx[BLOCK_DIM];
+	__shared__ float t_dxdy[BLOCK_DIM];
+	__shared__ float t_dydy[BLOCK_DIM];
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dx = dx[idx];
+	float l_dy = dy[idx];
+
+	t_dxdx[threadIdx.x] = l_dx * l_dx;
+	t_dxdy[threadIdx.x] = l_dx * l_dy;
+	t_dydy[threadIdx.x] = l_dy * l_dy;
+
+	__syncthreads();
+
+	int nTotalThreads = blockDim.x;					 
+	while (nTotalThreads > 1)
+	{
+		int halfPoint = (nTotalThreads >> 1);	// divide by two		
+ 
+		if (threadIdx.x < halfPoint)
+		    t_dxdx[threadIdx.x] += t_dxdx[threadIdx.x + halfPoint];
+ 
+		__syncthreads();
+ 
+		nTotalThreads = halfPoint;
+	}
+
+	return t_dxdx[0];
+}
+
+__device__ float g_total_sum(float* dxdx, float* dxdy, float* dydy)
+{
+	float sum = 0;
+	for (int i=0; i<gridDim.x; i++)
+		sum += dxdx[i];
+	return sum;
+}
+
 __global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
 {
-	// @todo: poki co bardzo naiwna redukcja, cos przyjemniejszego do opracowania
+	float partialSum = g_partial_sum(dx, dy);
+	if (threadIdx.x == 0)
+	{
+		dxdx[blockIdx.x] = partialSum;
+		__threadfence();
+		unsigned int value = atomicInc(&kernel_block_counter, gridDim.x);
+		kernel_last_block_done = (value == (gridDim.x - 1));
+	}
 
-	if (blockIdx.x == 0)
+	__syncthreads();
+
+	if (kernel_last_block_done) 
 	{
-		if (threadIdx.x == 0)
+		float totalSum = g_total_sum(dxdx, dxdy, dydy);
+		if (threadIdx.x == 0) 
 		{
-			*dxdx = dotSum(dx, dx, size);
+			dxdx[0] = totalSum;
+			kernel_block_counter = 0;
 		}
 	}
-	else if (blockIdx.x == 1)
+
+	
+}
+*/
+
+// ta wersja wprowadzala znaczaco duze bledy
+__global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
+{
+	// to tez nie dziala
+	/*int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float s1 = dx[idx]*dx[idx];
+	float s2 = dx[idx]*dy[idx];
+	float s3 = dy[idx]*dy[idx];
+	atomicAdd(dxdx,s1);
+	atomicAdd(dxdy,s2);
+	atomicAdd(dydy,s3);
+	*/
+	
+	__shared__ float t_dxdx[BLOCK_DIM];
+	__shared__ float t_dxdy[BLOCK_DIM];
+	__shared__ float t_dydy[BLOCK_DIM];
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dx = dx[idx];
+	float l_dy = dy[idx];
+
+	t_dxdx[threadIdx.x] = l_dx * l_dx;
+	t_dxdy[threadIdx.x] = l_dx * l_dy;
+	t_dydy[threadIdx.x] = l_dy * l_dy;
+
+	__syncthreads();
+
+	if (threadIdx.x == 0) 
 	{
-		if (threadIdx.x == 0)
+		float s_dxdx = 0, s_dxdy = 0, s_dydy = 0;
+
+		#pragma unroll
+		for (int i = 0; i < BLOCK_DIM; i++)
 		{
-			*dxdy = dotSum(dx, dy, size);
+			s_dxdx += t_dxdx[i];
+			s_dxdy += t_dxdy[i];
+			s_dydy += t_dydy[i];
 		}
+
+		//printf("%f\n", s_dxdx);
+
+		atomicAdd(dxdx, s_dxdx);
+		atomicAdd(dxdy, s_dxdy);
+		atomicAdd(dydy, s_dydy);
 	}
-	else if (blockIdx.x == 2)
-	{
-		if (threadIdx.x == 0)
-		{
-			*dydy = dotSum(dy, dy, size);
-		}
-	}
+	
 }
 
 // na chwile obecna nie wykorzystywane, bo strasznie mulilo - jesli to robic to jakos zmyslniej
-__global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* by, unsigned size)
+__global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* by)
 {
-	// @todo: poki co bardzo naiwna redukcja, cos przyjemniejszego do opracowania
+	__shared__ float t_dxdt[BLOCK_DIM];
+	__shared__ float t_dydt[BLOCK_DIM];
 
-	if (blockIdx.x == 0)
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dt = dt[idx];
+
+	t_dxdt[threadIdx.x] = dx[idx] * l_dt;
+	t_dydt[threadIdx.x] = dy[idx] * l_dt;
+
+	__syncthreads();
+
+	if (threadIdx.x == 0) 
 	{
-		if (threadIdx.x == 0)
+		float s_dxdt = 0, s_dydt = 0;
+
+		#pragma unroll
+		for (int i = 0; i < BLOCK_DIM; i++)
 		{
-			*bx = dotSum(dx, dt, size);
+			s_dxdt += t_dxdt[i];
+			s_dydt += t_dydt[i];
 		}
-	}
-	else if (blockIdx.x == 1)
-	{
-		if (threadIdx.x == 0)
-		{
-			*by = dotSum(dy, dt, size);
-		}
+
+		atomicAdd(bx, s_dxdt);
+		atomicAdd(by, s_dydt);
 	}
 }
 
@@ -294,14 +405,18 @@ void allocateMemoryIfNeeded(unsigned width, unsigned height)
 	if (gpuFrame == NULL)
 		checkCudaErrors(cudaMalloc(&gpuFrame, 3 * width * height * sizeof(unsigned char))); 
 
+	unsigned wthAligned = width * height;
+	if (wthAligned % BLOCK_DIM != 0)
+		wthAligned += (BLOCK_DIM - wthAligned % BLOCK_DIM);
+
 	if (devDx == NULL)
-		checkCudaErrors(cudaMalloc(&devDx, width * height * sizeof(float))); 
+		checkCudaErrors(cudaMalloc(&devDx, wthAligned * sizeof(float))); 
 
 	if (devDy == NULL)
-		checkCudaErrors(cudaMalloc(&devDy, width * height * sizeof(float))); 
+		checkCudaErrors(cudaMalloc(&devDy, wthAligned * sizeof(float))); 
 
 	if (devDt == NULL)
-		checkCudaErrors(cudaMalloc(&devDt, width * height * sizeof(float))); 
+		checkCudaErrors(cudaMalloc(&devDt, wthAligned * sizeof(float))); 
 
 	if (cpuDx == NULL)
 		cpuDx = (float*) malloc(width * height * sizeof(float));
@@ -310,7 +425,7 @@ void allocateMemoryIfNeeded(unsigned width, unsigned height)
 		cpuDy = (float*) malloc(width * height * sizeof(float));
 
 	if (cpuDt == NULL)
-		cpuDt = (float*) malloc(width * height * sizeof(float));
+		cpuDt = (float*) malloc(width * height * sizeof(float));	
 }
 
 void kanadeNextFrame(unsigned char* pixels, unsigned width, unsigned height)
@@ -390,11 +505,33 @@ void kanadeTranslate(unsigned char* target, float vx, float vy, unsigned width, 
 
 void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& dxdx, float& dxdy, float& dydy)
 {
+	// potrzebujemy wyrownac do BLOCK_DIM, zeby jadro redukcji dzialalo poprawnie
+	unsigned sizeAligned = width * height;
+	if (sizeAligned % BLOCK_DIM != 0)
+		sizeAligned += (BLOCK_DIM - sizeAligned % BLOCK_DIM);
+	checkCudaErrors(cudaMemset(devDx, 0, sizeAligned * sizeof(float)));
+	checkCudaErrors(cudaMemset(devDy, 0, sizeAligned * sizeof(float)));
+
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 	calculate_dxdy<<<dimGrid, dimBlock>>>(prevFrame8[pyrLvl], devDx, devDy, width, height);
 	checkCudaErrors(cudaDeviceSynchronize());
+
+	checkCudaErrors(cudaMemset(devG, 0, 3 * sizeof(float)));
+	reduce_to_g<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, &devG[0], &devG[1], &devG[2], sizeAligned);
+	checkCudaErrors(cudaGetLastError());
+
+	//reduce_to_g<<<(width * height + REDUCTION_BLOCK_DIM - 1) / REDUCTION_BLOCK_DIM, REDUCTION_BLOCK_DIM>>>(devDx, devDy, &devG[0], NULL, NULL, sizeAligned);
+
+	checkCudaErrors(cudaDeviceSynchronize());
+	checkCudaErrors(cudaMemcpy(cpuG, devG, 3 * sizeof(float), cudaMemcpyDeviceToHost));
+	dxdx = cpuG[0];
+	dxdy = cpuG[1];
+	dydy = cpuG[2];
+
 	
+	/*
+	// to poki co musi byc kopiowane dla obliczania wektora B
 	unsigned size = width * height;
 	checkCudaErrors(cudaMemcpy(cpuDx, devDx, size * sizeof(float), cudaMemcpyDeviceToHost));
 	checkCudaErrors(cudaMemcpy(cpuDy, devDy, size * sizeof(float), cudaMemcpyDeviceToHost));
@@ -405,15 +542,29 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 	//dxdx = dotSum(cpuDx, cpuDx, width, height);
 	//dxdy = dotSum(cpuDx, cpuDy, width, height);
 	//dydy = dotSum(cpuDy, cpuDy, width, height);
+	*/
 }
 
 void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& bx, float& by)
 {
+	unsigned sizeAligned = width * height;
+	if (sizeAligned % BLOCK_DIM != 0)
+		sizeAligned += (BLOCK_DIM - sizeAligned % BLOCK_DIM);
+	checkCudaErrors(cudaMemset(devDt, 0, sizeAligned * sizeof(float)));
+
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 	calculate_dt<<<dimGrid, dimBlock>>>(pyrLvl, vx, vy, prevFrame8[pyrLvl], ioFrame8[pyrLvl], devDt, width, height);
 	checkCudaErrors(cudaDeviceSynchronize());
 
+	checkCudaErrors(cudaMemset(devB, 0, 2 * sizeof(float)));
+	reduce_to_b<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, devDt, &devB[0], &devB[1]);
+
+	checkCudaErrors(cudaMemcpy(cpuB, devB, 2 * sizeof(float), cudaMemcpyDeviceToHost));
+	bx = cpuB[0];
+	by = cpuB[1];
+
+	/*
 	unsigned size = width * height;
 	checkCudaErrors(cudaMemcpy(cpuDt, devDt, size * sizeof(float), cudaMemcpyDeviceToHost));
 
@@ -421,6 +572,7 @@ void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsig
 	by = dotSum(cpuDy, cpuDt, size);
 	//bx = dotSum(cpuDx, cpuDt, width, height);
 	//by = dotSum(cpuDy, cpuDt, width, height);
+	*/
 }
 
 // level 0 is automatically initiated elsewhere
@@ -446,6 +598,12 @@ void kanadeInit()
 	// jesli tekstura odwoluje sie poza swoj zakres to zwracany jest kolor zerowy
 	frameTex.addressMode[0] = cudaAddressModeBorder;	
     frameTex.addressMode[1] = cudaAddressModeBorder; 
+
+	checkCudaErrors(cudaMalloc(&devG, 3 * sizeof(float))); 
+	checkCudaErrors(cudaMalloc(&devB, 2 * sizeof(float))); 
+	
+	cpuG = (float*) malloc(3 * sizeof(float));
+	cpuB = (float*) malloc(2 * sizeof(float));	
 }
 
 void kanadeCleanup()
@@ -485,6 +643,15 @@ void kanadeCleanup()
 		free(cpuDy);
 	if (cpuDt != NULL)
 		free(cpuDt);
+
+	if (devG != NULL)
+		cudaFree(devG);
+	if (devB != NULL)
+		cudaFree(devB);
+	if (cpuG != NULL)
+		free(cpuG);
+	if (cpuB != NULL)
+		free(cpuB);
 }
 
 // for testing purposes only

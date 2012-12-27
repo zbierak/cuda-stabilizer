@@ -29,7 +29,7 @@ inline std::string toString(T val)
 #ifdef _WIN32
 inline float roundf(float d)
 {
-	return floor( d + 0.5 );
+	return floor( d + 0.5f );
 }
 #endif
 

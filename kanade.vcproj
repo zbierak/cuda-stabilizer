@@ -34,6 +34,8 @@
 			<Tool
 				Name="Cudart Build Rule"
 				GPUDebugInfo="true"
+				Arch1="30"
+				Arch2="0"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -50,7 +52,7 @@
 				Optimization="0"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
-				RuntimeLibrary="3"
+				RuntimeLibrary="0"
 				WarningLevel="3"
 				DebugInformationFormat="4"
 			/>
@@ -124,7 +126,7 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
-				AdditionalOptions="-DKANADE_NO_GPU -DKANADE_NO_RFRAME_UPDATE1"
+				AdditionalOptions="-DKANADE_NO_GPU1 -DKANADE_NO_RFRAME_UPDATE1"
 				Optimization="2"
 				EnableIntrinsicFunctions="true"
 				RuntimeLibrary="2"
