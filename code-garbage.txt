@@ -143,3 +143,70 @@ __device__ __host__ float dotSum(T1* a, T2* b, int width, int height)
 	
 	return sum;
 }
+
+-------------------------------------------------------- FAST REDUCE TO G & B, BEFORE OPTIMIZATION
+
+__global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* by)
+{
+	__shared__ float t_dxdt[BLOCK_DIM];
+	__shared__ float t_dydt[BLOCK_DIM];
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dt = dt[idx];
+
+	t_dxdt[threadIdx.x] = dx[idx] * l_dt;
+	t_dydt[threadIdx.x] = dy[idx] * l_dt;
+
+	__syncthreads();
+
+	if (threadIdx.x == 0) 
+	{
+		float s_dxdt = 0, s_dydt = 0;
+
+		#pragma unroll
+		for (int i = 0; i < BLOCK_DIM; i++)
+		{
+			s_dxdt += t_dxdt[i];
+			s_dydt += t_dydt[i];
+		}
+
+		atomicAdd(bx, s_dxdt);
+		atomicAdd(by, s_dydt);
+	}
+}
+
+__global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
+{
+	__shared__ float t_dxdx[BLOCK_DIM];
+	__shared__ float t_dxdy[BLOCK_DIM];
+	__shared__ float t_dydy[BLOCK_DIM];
+
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+	float l_dx = dx[idx];
+	float l_dy = dy[idx];
+
+	t_dxdx[threadIdx.x] = l_dx * l_dx;
+	t_dxdy[threadIdx.x] = l_dx * l_dy;
+	t_dydy[threadIdx.x] = l_dy * l_dy;
+
+	__syncthreads();
+
+	if (threadIdx.x == 0) 
+	{
+		float s_dxdx = 0, s_dxdy = 0, s_dydy = 0;
+
+		#pragma unroll
+		for (int i = 0; i < BLOCK_DIM; i++)
+		{
+			s_dxdx += t_dxdx[i];
+			s_dxdy += t_dxdy[i];
+			s_dydy += t_dydy[i];
+		}
+
+		atomicAdd(dxdx, s_dxdx);
+		atomicAdd(dxdy, s_dxdy);
+		atomicAdd(dydy, s_dydy);
+	}
+}

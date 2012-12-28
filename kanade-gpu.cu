@@ -2,8 +2,12 @@
 
 namespace kgpu {
 
-const unsigned BLOCK_DIM = 32;
-const unsigned BLOCK_DIM_SQ = BLOCK_DIM * BLOCK_DIM;
+const unsigned BLOCK_2POW = 5;										
+const unsigned BLOCK_DIM = 2 << (BLOCK_2POW-1);
+//const unsigned BLOCK_DIM_SQ = BLOCK_DIM * BLOCK_DIM;
+
+const unsigned RED_BLOCK_2POW = 7;									// BLOCK_SIZE = 2 ^ BLOCK_2POW
+const unsigned RED_BLOCK_DIM = 2 << (RED_BLOCK_2POW-1);
 
 #include "kanade.h"
 #include "helper_cuda.h"
@@ -221,9 +225,9 @@ __global__ void calculate_dt(unsigned pyrLvl, float vx, float vy, unsigned char*
 
 __global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, float* dydy, unsigned size)
 {
-	__shared__ float t_dxdx[BLOCK_DIM];
-	__shared__ float t_dxdy[BLOCK_DIM];
-	__shared__ float t_dydy[BLOCK_DIM];
+	__shared__ float t_dxdx[RED_BLOCK_DIM];
+	__shared__ float t_dxdy[RED_BLOCK_DIM];
+	__shared__ float t_dydy[RED_BLOCK_DIM];
 
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -236,28 +240,36 @@ __global__ void reduce_to_g(float* dx, float* dy, float* dxdx, float* dxdy, floa
 
 	__syncthreads();
 
-	if (threadIdx.x == 0) 
-	{
-		float s_dxdx = 0, s_dxdy = 0, s_dydy = 0;
+	int half = blockDim.x;
 
-		#pragma unroll
-		for (int i = 0; i < BLOCK_DIM; i++)
+	#pragma unroll
+	for (int i=0; i<RED_BLOCK_2POW; i++)
+	{
+		half = half >> 1;
+
+		if (threadIdx.x < half)
 		{
-			s_dxdx += t_dxdx[i];
-			s_dxdy += t_dxdy[i];
-			s_dydy += t_dydy[i];
+			int thread2 = threadIdx.x + half;
+			t_dxdx[threadIdx.x] +=  t_dxdx[thread2];
+			t_dxdy[threadIdx.x] +=  t_dxdy[thread2];
+			t_dydy[threadIdx.x] +=  t_dydy[thread2];
 		}
 
-		atomicAdd(dxdx, s_dxdx);
-		atomicAdd(dxdy, s_dxdy);
-		atomicAdd(dydy, s_dydy);
+		__syncthreads();
+	}
+
+	if (threadIdx.x == 0) 
+	{
+		atomicAdd(dxdx, t_dxdx[0]);
+		atomicAdd(dxdy, t_dxdy[0]);
+		atomicAdd(dydy, t_dydy[0]);
 	}
 }
 
 __global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* by)
 {
-	__shared__ float t_dxdt[BLOCK_DIM];
-	__shared__ float t_dydt[BLOCK_DIM];
+	__shared__ float t_dxdt[RED_BLOCK_DIM];
+	__shared__ float t_dydt[RED_BLOCK_DIM];
 
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -268,19 +280,27 @@ __global__ void reduce_to_b(float* dx, float* dy, float* dt, float* bx, float* b
 
 	__syncthreads();
 
-	if (threadIdx.x == 0) 
-	{
-		float s_dxdt = 0, s_dydt = 0;
+	int half = blockDim.x;
 
-		#pragma unroll
-		for (int i = 0; i < BLOCK_DIM; i++)
+	#pragma unroll
+	for (int i=0; i<RED_BLOCK_2POW; i++)
+	{
+		half = half >> 1;
+
+		if (threadIdx.x < half)
 		{
-			s_dxdt += t_dxdt[i];
-			s_dydt += t_dydt[i];
+			int thread2 = threadIdx.x + half;
+			t_dxdt[threadIdx.x] +=  t_dxdt[thread2];
+			t_dydt[threadIdx.x] +=  t_dydt[thread2];
 		}
 
-		atomicAdd(bx, s_dxdt);
-		atomicAdd(by, s_dydt);
+		__syncthreads();
+	}
+
+	if (threadIdx.x == 0) 
+	{
+		atomicAdd(bx, t_dxdt[0]);
+		atomicAdd(by, t_dydt[0]);
 	}
 }
 
@@ -305,8 +325,8 @@ void allocateMemoryIfNeeded(unsigned width, unsigned height)
 		checkCudaErrors(cudaMalloc(&gpuFrame, 3 * width * height * sizeof(unsigned char))); 
 
 	unsigned wthAligned = width * height;
-	if (wthAligned % BLOCK_DIM != 0)
-		wthAligned += (BLOCK_DIM - wthAligned % BLOCK_DIM);
+	if (wthAligned % RED_BLOCK_DIM != 0)
+		wthAligned += (RED_BLOCK_DIM - wthAligned % RED_BLOCK_DIM);
 
 	if (devDx == NULL)
 		checkCudaErrors(cudaMalloc(&devDx, wthAligned * sizeof(float))); 
@@ -391,8 +411,8 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 {
 	// we need to align to BLOCK_DIM, so that reduction works correctly
 	unsigned sizeAligned = width * height;
-	if (sizeAligned % BLOCK_DIM != 0)
-		sizeAligned += (BLOCK_DIM - sizeAligned % BLOCK_DIM);
+	if (sizeAligned % RED_BLOCK_DIM != 0)
+		sizeAligned += (RED_BLOCK_DIM - sizeAligned % RED_BLOCK_DIM);
 	checkCudaErrors(cudaMemset(devDx, 0, sizeAligned * sizeof(float)));
 	checkCudaErrors(cudaMemset(devDy, 0, sizeAligned * sizeof(float)));
 
@@ -402,7 +422,7 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 	checkCudaErrors(cudaMemset(devG, 0, 3 * sizeof(float)));
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	reduce_to_g<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, &devG[0], &devG[1], &devG[2], sizeAligned);
+	reduce_to_g<<<sizeAligned / RED_BLOCK_DIM, RED_BLOCK_DIM>>>(devDx, devDy, &devG[0], &devG[1], &devG[2], sizeAligned);
 	checkCudaErrors(cudaGetLastError());
 
 	checkCudaErrors(cudaMemcpy(cpuG, devG, 3 * sizeof(float), cudaMemcpyDeviceToHost));
@@ -414,8 +434,8 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsigned height, float& bx, float& by)
 {
 	unsigned sizeAligned = width * height;
-	if (sizeAligned % BLOCK_DIM != 0)
-		sizeAligned += (BLOCK_DIM - sizeAligned % BLOCK_DIM);
+	if (sizeAligned % RED_BLOCK_DIM != 0)
+		sizeAligned += (RED_BLOCK_DIM - sizeAligned % RED_BLOCK_DIM);
 	checkCudaErrors(cudaMemset(devDt, 0, sizeAligned * sizeof(float)));
 
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
@@ -424,7 +444,7 @@ void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsig
 	checkCudaErrors(cudaMemset(devB, 0, 2 * sizeof(float)));
 	checkCudaErrors(cudaDeviceSynchronize());
 	
-	reduce_to_b<<<sizeAligned / BLOCK_DIM, BLOCK_DIM>>>(devDx, devDy, devDt, &devB[0], &devB[1]);
+	reduce_to_b<<<sizeAligned / RED_BLOCK_DIM, RED_BLOCK_DIM>>>(devDx, devDy, devDt, &devB[0], &devB[1]);
 
 	checkCudaErrors(cudaMemcpy(cpuB, devB, 2 * sizeof(float), cudaMemcpyDeviceToHost));
 	bx = cpuB[0];
