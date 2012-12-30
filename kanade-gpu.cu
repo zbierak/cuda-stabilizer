@@ -418,11 +418,11 @@ void kanadeCalculateG(unsigned pyrLvl, unsigned width, unsigned height, float& d
 
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
-	calculate_dxdy<<<dimGrid, dimBlock>>>(prevFrame8[pyrLvl], devDx, devDy, width, height);
 	checkCudaErrors(cudaMemset(devG, 0, 3 * sizeof(float)));
-	checkCudaErrors(cudaDeviceSynchronize());
 
+	calculate_dxdy<<<dimGrid, dimBlock>>>(prevFrame8[pyrLvl], devDx, devDy, width, height);
 	reduce_to_g<<<sizeAligned / RED_BLOCK_DIM, RED_BLOCK_DIM>>>(devDx, devDy, &devG[0], &devG[1], &devG[2], sizeAligned);
+
 	checkCudaErrors(cudaGetLastError());
 
 	checkCudaErrors(cudaMemcpy(cpuG, devG, 3 * sizeof(float), cudaMemcpyDeviceToHost));
@@ -440,10 +440,9 @@ void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsig
 
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
-	calculate_dt<<<dimGrid, dimBlock>>>(pyrLvl, vx, vy, prevFrame8[pyrLvl], ioFrame8[pyrLvl], devDt, width, height);
 	checkCudaErrors(cudaMemset(devB, 0, 2 * sizeof(float)));
-	checkCudaErrors(cudaDeviceSynchronize());
-	
+
+	calculate_dt<<<dimGrid, dimBlock>>>(pyrLvl, vx, vy, prevFrame8[pyrLvl], ioFrame8[pyrLvl], devDt, width, height);	
 	reduce_to_b<<<sizeAligned / RED_BLOCK_DIM, RED_BLOCK_DIM>>>(devDx, devDy, devDt, &devB[0], &devB[1]);
 
 	checkCudaErrors(cudaMemcpy(cpuB, devB, 2 * sizeof(float), cudaMemcpyDeviceToHost));
