@@ -381,7 +381,6 @@ void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYR
 
 	// prepare pyramid level zero
 	toGrayscale<<<(width[0]*height[0] + BLOCK_DIM-1)/BLOCK_DIM, BLOCK_DIM>>>(ioFrame24, prevFrame8[0], width[0], height[0]);
-	checkCudaErrors(cudaDeviceSynchronize());
 
 	// prepare other pyramid levels
 	for (unsigned i=1; i<PYRAMID_SIZE; i++)
@@ -390,9 +389,6 @@ void kanadePrepareForNextFrame(unsigned width[PYRAMID_SIZE], unsigned height[PYR
 		dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 
 		build_pyramid_level<<<dimGrid, dimBlock>>>(prevFrame8[i-1], prevFrame8[i], width[i], height[i]);
-
-		// musimy sie synchronizowac, bo kolejne poziomy wymagaja obliczen z popzednich
-		checkCudaErrors(cudaDeviceSynchronize());
 	}
 }
 
@@ -435,8 +431,12 @@ void kanadeCalculateB(unsigned pyrLvl, float vx, float vy, unsigned width, unsig
 {
 	unsigned sizeAligned = width * height;
 	if (sizeAligned % RED_BLOCK_DIM != 0)
-		sizeAligned += (RED_BLOCK_DIM - sizeAligned % RED_BLOCK_DIM);
-	checkCudaErrors(cudaMemset(devDt, 0, sizeAligned * sizeof(float)));
+	{
+		unsigned diff = (RED_BLOCK_DIM - sizeAligned % RED_BLOCK_DIM); 
+		checkCudaErrors(cudaMemset(&devDt[sizeAligned], 0, diff * sizeof(float)));
+		sizeAligned += diff;
+		
+	}
 
 	dim3 dimGrid((width + BLOCK_DIM - 1) / BLOCK_DIM, (height + BLOCK_DIM - 1) / BLOCK_DIM);
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
@@ -457,9 +457,6 @@ void kanadeBuildPyramidLevel(unsigned levelId, unsigned newWidth, unsigned newHe
 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);	
 
 	build_pyramid_level<<<dimGrid, dimBlock>>>(ioFrame8[levelId-1], ioFrame8[levelId], newWidth, newHeight);
-
-	// synchronize, as next levels require computations from the previous ones
-	checkCudaErrors(cudaDeviceSynchronize());
 }
 
 void kanadeInit()
@@ -519,6 +516,8 @@ void kanadeCleanup()
 		free(cpuG);
 	if (cpuB != NULL)
 		free(cpuB);
+
+	checkCudaErrors(cudaDeviceReset());
 }
 
 // for testing purposes only
