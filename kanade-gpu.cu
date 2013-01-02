@@ -2,12 +2,12 @@
 
 namespace kgpu {
 
-const unsigned BLOCK_2POW = 5;										
+const unsigned BLOCK_2POW = 5;										// maximum value = 5 (in some kernels blocksize = BLOCK_DIM_SQ > MAX_BLOCK_SIZE)
 const unsigned BLOCK_DIM = 2 << (BLOCK_2POW-1);
 //const unsigned BLOCK_DIM_SQ = BLOCK_DIM * BLOCK_DIM;
 
-const unsigned RED_BLOCK_2POW = 7;									// BLOCK_SIZE = 2 ^ BLOCK_2POW
-const unsigned RED_BLOCK_DIM = 2 << (RED_BLOCK_2POW-1);
+const unsigned RED_BLOCK_2POW = 7;									// the most optimal value = 7
+const unsigned RED_BLOCK_DIM = 2 << (RED_BLOCK_2POW-1);				// BLOCK_SIZE = 2 ^ BLOCK_2POW
 
 #include "kanade.h"
 #include "helper_cuda.h"
@@ -91,11 +91,10 @@ __global__ void build_pyramid_level(unsigned char* prevLvl8b, unsigned char* new
 	int x = blockIdx.x*blockDim.x + threadIdx.x;
 	int y = blockIdx.y*blockDim.y + threadIdx.y;
 
-	// zezwol tylko na wartosci z poprawnego zakresu
+	// calculate only when inside the picture
 	if (x >= newWidth || y >= newHeight) return;
 
-	// srednia z czterech wartosci, mozna tez zrobic min/max
-	// @todo: to mozna zrobic wydajniej laczac operacje odczytu
+	// calculate the mean value (also min/max can be considered)
 
 	int width = 2*newWidth;
 	int np = 2*(y*width + x);
@@ -109,10 +108,10 @@ __global__ void translate(float vx, float vy, unsigned char* input24, unsigned c
 	int x = blockIdx.x*blockDim.x + threadIdx.x;
 	int y = blockIdx.y*blockDim.y + threadIdx.y;
 	
-	// zezwol tylko na wartosci z poprawnego zakresu
+	// calculate only when inside the picture
 	if (x >= width || y >= height) return;
 
-	// nearest neighbour version
+	// nearest neighbour version translation
 	int dx = (int) round(vx);					
 	int dy = (int) round(vy);
 
@@ -133,12 +132,10 @@ __global__ void calculate_dxdy(unsigned char* frame8, float* dx, float* dy, unsi
 	int x = blockIdx.x*blockDim.x + threadIdx.x;
 	int y = blockIdx.y*blockDim.y + threadIdx.y;
 	
-	// zezwol tylko na wartosci z poprawnego zakresu
+	// calculate only when inside the picture
 	if (x >= width || y >= height) return;
 
-	// rozwazyc czy nie zastapic tego dodaniem paddingu po obu stronach obrazu
-
-	// @todo: to mozna zrobic wydajniej przy uzyciu pamieci dzielonej
+	// calculate dx and dy (for borders automatically equal to zero, set using memset before the kernel launch)
 	int pos = y*width + x;
 	if (x != 0 && x != width-1)
 		dx[pos] = ((float)(frame8[pos+1]-frame8[pos-1])) / 2.0f;
@@ -151,8 +148,8 @@ __global__ void calculate_dt(unsigned pyrLvl, float vx, float vy, unsigned char*
 {
 	int x = blockIdx.x*blockDim.x + threadIdx.x;
 	int y = blockIdx.y*blockDim.y + threadIdx.y;
-	
-	// zezwol tylko na wartosci z poprawnego zakresu
+
+	// calculate only when inside the picture
 	if (x >= width || y >= height) return;
 
 	int dx = (int) floor(vx);
